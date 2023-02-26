@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -76,7 +77,7 @@ func mostrarBaseDatos(db *sql.DB) {
 			}
 			datos = append(datos, dato)
 		}
-		fmt.Printf("ID: %d, Nombre: %s, FechaCreación: %s, Data: %#v\n", id, nombre, fechaCreacion, data)
+		fmt.Printf("ID: %d ,Nombre: %s, FechaCreación: %s, Data: %#v\n", id, nombre, fechaCreacion, data)
 	}
 }
 func conectar() *sql.DB {
@@ -109,15 +110,32 @@ func lectura(path string) ([]string, []string) {
 }
 func main() {
 	path := os.Args[1]
+	args := os.Args[2:]
+	flagSet := flag.NewFlagSet("flag", flag.ExitOnError)
+	create := flagSet.Bool("create", false, "Crea la tabla")
+	borrar := flagSet.Bool("borrar", false, "Borra la tabla")
+	insert := flagSet.Bool("insert", false, "Inserta registros en la tabla")
+	show := flagSet.Bool("show", false, "Muestra todos los registros de la tabla")
+	flagSet.Parse(args)
 	files, err := ioutil.ReadDir(path)
 	if err != nil {
 		log.Fatal(err)
 	}
 	db := conectar()
 	defer db.Close()
-	for _, file := range files {
-		parametros, valores := lectura(filepath.Join(path, file.Name()))
-		insertarDatos(db, parametros, valores)
+	if *borrar {
+		borrarTabla(db)
 	}
-	mostrarBaseDatos(db)
+	if *create {
+		crearTabla(db)
+	}
+	if *insert {
+		for _, file := range files {
+			parametros, valores := lectura(filepath.Join(path, file.Name()))
+			insertarDatos(db, parametros, valores)
+		}
+	}
+	if *show {
+		mostrarBaseDatos(db)
+	}
 }
