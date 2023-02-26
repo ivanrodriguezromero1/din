@@ -2,56 +2,91 @@ package main
 
 import (
 	"bufio"
-	"bytes"
-	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
-	"text/template"
+	"path/filepath"
+	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	_ "github.com/mattn/go-sqlite3"
 )
 
-type Config struct {
-	Host string
-	Port int
+type Dato struct {
+	Parametro string `json:"parametro"`
+	Valor     string `json:"valor"`
 }
 
-const connStr = "mongodb://{{.Host}}:{{.Port}}"
-
-func conectar() *mongo.Client {
-	config := Config{
-		Host: "localhost",
-		Port: 27017,
-	}
-	var connBuffer bytes.Buffer
-	tmpl, err1 := template.New("conn").Parse(connStr)
-	if err1 != nil {
-		log.Fatal(err1)
-	}
-	if err2 := tmpl.Execute(&connBuffer, config); err2 != nil {
-		log.Fatal(err2)
-	}
-	connectionString := connBuffer.String()
-	client, err := mongo.NewClient(options.Client().ApplyURI(connectionString))
+func borrarTabla(db *sql.DB) {
+	_, err := db.Exec("DROP TABLE IF EXISTS Archivos")
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	err = client.Connect(ctx)
+}
+func crearTabla(db *sql.DB) {
+	_, err := db.Exec(`
+	CREATE TABLE IF NOT EXISTS Archivos (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		nombre TEXT NOT NULL,
+		fechaCreacion DATE,
+		data TEXT
+	);`)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return client
-	// defer client.Disconnect(ctx)
-	// collection := client.Database("din1").Collection("collectionDin1")
 }
-func operation(path string) {
+func insertarDatos(db *sql.DB, parametros []string, valores []string) {
+	var datos []string
+	for i := 0; i < len(parametros); i++ {
+		dato, _ := json.Marshal(Dato{Parametro: parametros[i], Valor: valores[i]})
+		datos = append(datos, string(dato))
+	}
+	_, err := db.Exec("INSERT INTO Archivos (nombre, fechaCreacion, data) VALUES (?, ?, ?)",
+		valores[0], time.Now(), strings.Join(datos, ";"))
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+func mostrarBaseDatos(db *sql.DB) {
+	rows, err := db.Query("SELECT * FROM Archivos")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int
+		var nombre string
+		var fechaCreacion string
+		var data string
+		err = rows.Scan(&id, &nombre, &fechaCreacion, &data)
+		if err != nil {
+			log.Fatal(err)
+		}
+		datosExtraidos := strings.Split(data, ";")
+		var datos []Dato
+		for _, datoJSON := range datosExtraidos {
+			var dato Dato
+			if err := json.Unmarshal([]byte(datoJSON), &dato); err != nil {
+				log.Println("Error al decodificar dato JSON:", err)
+				continue
+			}
+			datos = append(datos, dato)
+		}
+		fmt.Printf("ID: %d, Nombre: %s, FechaCreación: %s, Data: %#v\n", id, nombre, fechaCreacion, data)
+	}
+}
+func conectar() *sql.DB {
+	db, err := sql.Open("sqlite3", "test.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	return db
+}
+func lectura(path string) ([]string, []string) {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal(err)
@@ -70,64 +105,19 @@ func operation(path string) {
 		}
 		i++
 	}
-	client := conectar()
-	defer client.Disconnect(context.Background())
-	var docs []bson.M
-	for i := 0; i < len(parametros); i++ {
-		doc := bson.M{
-			"parametro": parametros[i],
-			"valor":     valores[i],
-			// "fechaDeCreacion": time.Now(),
-		}
-		docs = append(docs, doc)
-	}
-	// document := []interface{}{
-	// 	bson.M{valores[0]: docs},
-	// }
-	// limpiar(client)
-	mostrar(client)
-	// insertar(client, document)
-}
-func limpiar(client *mongo.Client) {
-	err := client.Database("din1").Drop(context.Background())
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Base de datos limpiada exitosamente")
-}
-func mostrar(client *mongo.Client) {
-	collection := client.Database("din1").Collection("collectionDin1")
-	cursor, err := collection.Find(context.Background(), bson.M{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer cursor.Close(context.Background())
-	for cursor.Next(context.Background()) {
-		var result bson.M
-		err := cursor.Decode(&result)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(result)
-	}
-	if err := cursor.Err(); err != nil {
-		log.Fatal(err)
-	}
-}
-func insertar(client *mongo.Client, docs []interface{}) {
-	collection := client.Database("din1").Collection("collectionDin1")
-	_, err := collection.InsertMany(context.Background(), docs)
-	if err != nil {
-		log.Fatal(err)
-	}
+	return parametros, valores
 }
 func main() {
-	path := "archivos"
+	path := os.Args[1]
 	files, err := ioutil.ReadDir(path)
 	if err != nil {
 		log.Fatal(err)
 	}
+	db := conectar()
+	defer db.Close()
 	for _, file := range files {
-		operation(path + "/" + file.Name())
+		parametros, valores := lectura(filepath.Join(path, file.Name()))
+		insertarDatos(db, parametros, valores)
 	}
+	mostrarBaseDatos(db)
 }
