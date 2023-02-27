@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -80,6 +82,27 @@ func mostrarBaseDatos(db *sql.DB) {
 		fmt.Printf("ID: %d ,Nombre: %s, FechaCreación: %s, Data: %#v\n", id, nombre, fechaCreacion, data)
 	}
 }
+func mostrarFilaAgregada(db *sql.DB) {
+	var id int
+	var nombre string
+	var fechaCreacion string
+	var data string
+	err := db.QueryRow("SELECT * FROM Archivos ORDER BY ID DESC LIMIT 1").Scan(&id, &nombre, &fechaCreacion, &data)
+	if err != nil {
+		log.Fatal(err)
+	}
+	datosExtraidos := strings.Split(data, ";")
+	var datos []Dato
+	for _, datoJSON := range datosExtraidos {
+		var dato Dato
+		if err := json.Unmarshal([]byte(datoJSON), &dato); err != nil {
+			log.Println("Error al decodificar dato JSON:", err)
+			continue
+		}
+		datos = append(datos, dato)
+	}
+	fmt.Printf("ID: %d ,Nombre: %s, FechaCreación: %s, Data: %#v\n", id, nombre, fechaCreacion, data)
+}
 func conectar() *sql.DB {
 	db, err := sql.Open("sqlite3", "test.db")
 	if err != nil {
@@ -108,13 +131,59 @@ func lectura(path string) ([]string, []string) {
 	}
 	return parametros, valores
 }
+func insertarDatosArchivo(db *sql.DB, path string, file fs.FileInfo, i *float64, paso float64) {
+	parametros, valores := lectura(filepath.Join(path, file.Name()))
+	insertarDatos(db, parametros, valores)
+	if paso*100 < 1 {
+		*i = *i + paso
+		porcentajeStr := fmt.Sprintf("%.2f%%", *i*100)
+		fmt.Println(porcentajeStr)
+	}
+}
+func automatic(db *sql.DB, path string, show *bool) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer watcher.Close()
+	folderPath := path
+
+	err = watcher.Add(folderPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if event.Op&fsnotify.Create == fsnotify.Create {
+				fmt.Println("Se ha creado un archivo:", event.Name)
+				parametros, valores := lectura(event.Name)
+				insertarDatos(db, parametros, valores)
+				if *show {
+					mostrarFilaAgregada(db)
+				}
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			fmt.Println("Error:", err)
+		}
+	}
+}
+
 func main() {
 	path := os.Args[1]
 	args := os.Args[2:]
 	flagSet := flag.NewFlagSet("flag", flag.ExitOnError)
 	create := flagSet.Bool("create", false, "Crea la tabla")
-	borrar := flagSet.Bool("borrar", false, "Borra la tabla")
+	delete := flagSet.Bool("delete", false, "Borra la tabla")
 	insert := flagSet.Bool("insert", false, "Inserta registros en la tabla")
+	auto := flagSet.Bool("auto", false, "Inserta registros en la tabla")
 	show := flagSet.Bool("show", false, "Muestra todos los registros de la tabla")
 	flagSet.Parse(args)
 	files, err := ioutil.ReadDir(path)
@@ -123,19 +192,23 @@ func main() {
 	}
 	db := conectar()
 	defer db.Close()
-	if *borrar {
+	if *delete {
 		borrarTabla(db)
 	}
 	if *create {
 		crearTabla(db)
 	}
 	if *insert {
+		paso := float64(1 / float64(len(files)))
+		var i float64
 		for _, file := range files {
-			parametros, valores := lectura(filepath.Join(path, file.Name()))
-			insertarDatos(db, parametros, valores)
+			insertarDatosArchivo(db, path, file, &i, paso)
 		}
 	}
 	if *show {
 		mostrarBaseDatos(db)
+	}
+	if *auto {
+		automatic(db, path, show)
 	}
 }
