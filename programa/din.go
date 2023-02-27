@@ -168,7 +168,7 @@ func automatic(db *sql.DB, path string, show *bool) {
 				}
 			}
 			if event.Op&fsnotify.Write == fsnotify.Write {
-				fmt.Println("Se ha creado un archivo:", event.Name)
+				fmt.Println("Se ha actualizado el archivo:", event.Name)
 				parametros, valores := lectura(event.Name)
 				insertarDatos(db, parametros, valores)
 				if *show {
