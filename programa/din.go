@@ -48,7 +48,7 @@ func insertarDatos(db *sql.DB, parametros []string, valores []string) {
 		datos = append(datos, string(dato))
 	}
 	_, err := db.Exec("INSERT INTO Archivos (nombre, fechaCreacion, data) VALUES (?, ?, ?)",
-		valores[0], time.Now(), strings.Join(datos, ";"))
+		valores[0], time.Now(), strings.Join(datos, "\n"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func mostrarBaseDatos(db *sql.DB) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		datosExtraidos := strings.Split(data, ";")
+		datosExtraidos := strings.Split(data, "\n")
 		var datos []Dato
 		for _, datoJSON := range datosExtraidos {
 			var dato Dato
@@ -160,6 +160,14 @@ func automatic(db *sql.DB, path string, show *bool) {
 				return
 			}
 			if event.Op&fsnotify.Create == fsnotify.Create {
+				fmt.Println("Se ha creado un archivo:", event.Name)
+				parametros, valores := lectura(event.Name)
+				insertarDatos(db, parametros, valores)
+				if *show {
+					mostrarFilaAgregada(db)
+				}
+			}
+			if event.Op&fsnotify.Write == fsnotify.Write {
 				fmt.Println("Se ha creado un archivo:", event.Name)
 				parametros, valores := lectura(event.Name)
 				insertarDatos(db, parametros, valores)
