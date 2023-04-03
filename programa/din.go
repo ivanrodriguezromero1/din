@@ -91,7 +91,7 @@ func mostrarFilaAgregada(db *sql.DB) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	datosExtraidos := strings.Split(data, ";")
+	datosExtraidos := strings.Split(data, "\n")
 	var datos []Dato
 	for _, datoJSON := range datosExtraidos {
 		var dato Dato
@@ -159,16 +159,8 @@ func automatic(db *sql.DB, path string, show *bool) {
 			if !ok {
 				return
 			}
-			if event.Op&fsnotify.Create == fsnotify.Create {
-				fmt.Println("Se ha creado un archivo:", event.Name)
-				parametros, valores := lectura(event.Name)
-				insertarDatos(db, parametros, valores)
-				if *show {
-					mostrarFilaAgregada(db)
-				}
-			}
 			if event.Op&fsnotify.Write == fsnotify.Write {
-				fmt.Println("Se ha actualizado el archivo:", event.Name)
+				fmt.Println("Se ha creado o actualizado el archivo:", event.Name)
 				parametros, valores := lectura(event.Name)
 				insertarDatos(db, parametros, valores)
 				if *show {
@@ -191,7 +183,7 @@ func main() {
 	create := flagSet.Bool("create", false, "Crea la tabla")
 	delete := flagSet.Bool("delete", false, "Borra la tabla")
 	insert := flagSet.Bool("insert", false, "Inserta registros en la tabla")
-	auto := flagSet.Bool("auto", false, "Inserta registros en la tabla")
+	auto := flagSet.Bool("auto", false, "Inserta registros de forma automática en la tabla")
 	show := flagSet.Bool("show", false, "Muestra todos los registros de la tabla")
 	flagSet.Parse(args)
 	files, err := ioutil.ReadDir(path)
